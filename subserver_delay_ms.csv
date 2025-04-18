@@ -1,0 +1,9 @@
+Server,Oregon,Virginia,Ohio,Tokyo,Seoul,London,Frankfurt,Ireland
+Oregon,,67,49,96,124,136,143,124
+Virginia,67,,11,143,172,76,90,67
+Ohio,49,11,,130,159,86,99,77
+Tokyo,96,143,130,,34,210,235,199
+Seoul,124,172,159,34,,238,235,228
+London,136,76,86,210,238,,14,12
+Frankfurt,143,90,99,235,235,14,,24
+Ireland,124,67,77,199,228,12,24,

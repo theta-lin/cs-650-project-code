@@ -1,0 +1,89 @@
+import csv
+
+# Filenames for your CSV data
+delay_filename = 'subserver_bandwidth_Gbps.csv'
+bandwidth_filename = 'subserver_delay_ms.csv'
+
+# Read the delay CSV file into a dictionary
+delays = {}  # delays[src][dest] = delay value (string with unit "ms")
+with open(delay_filename, newline='') as csvfile:
+    reader = csv.reader(csvfile)
+    headers = next(reader)[1:]  # skip the first empty cell, then header names
+    for row in reader:
+        src = row[0]
+        delays[src] = {}
+        for i, value in enumerate(row[1:]):
+            dest = headers[i]
+            # If value is empty, we skip or leave it as None
+            delays[src][dest] = value.strip() if value.strip() != "" else None
+
+# Read the bandwidth CSV file into a dictionary
+bandwidths = {}  # bandwidths[src][dest] = bandwidth value (string with unit "Gbps")
+with open(bandwidth_filename, newline='') as csvfile:
+    reader = csv.reader(csvfile)
+    headers_band = next(reader)[1:]
+    for row in reader:
+        src = row[0]
+        bandwidths[src] = {}
+        for i, value in enumerate(row[1:]):
+            dest = headers_band[i]
+            # If value is empty, store None. Otherwise, convert to string with unit "Gbps"
+            bandwidths[src][dest] = (value.strip() + "Gbps") if value.strip() != "" else None
+
+# Prepare the list of server names (assuming same order in both CSVs)
+servers = headers  # list of server names, e.g. ['Oregon', 'Virginia', ...]
+
+# Start generating the NED file content
+ned_lines = []
+ned_lines.append("simple Subserver {")
+ned_lines.append("\tparameters:")
+ned_lines.append("\t\tint id;")
+ned_lines.append("\tgates:")
+ned_lines.append("\t\tinput in[8];")
+ned_lines.append("\t\toutput out[8];")
+ned_lines.append("}\n")
+ned_lines.append("network Network {")
+ned_lines.append("\tsubmodules:")
+
+# Create submodules for each server. We'll position them in a circle for simplicity.
+import math
+num_servers = len(servers)
+radius = 200
+center_x = 300
+center_y = 300
+for i, server in enumerate(servers):
+    angle = 2 * math.pi * i / num_servers
+    x = center_x + radius * math.cos(angle)
+    y = center_y + radius * math.sin(angle)
+    # Add submodule entry. We use the server name as identifier.
+    ned_lines.append(f"\t\t{server}: Subserver {{ id = {i}; @display(\"p={int(x)},{int(y)}\"); }}")
+
+ned_lines.append("")
+ned_lines.append("\tconnections allowunconnected:")
+
+# For each ordered pair of servers, add a connection if both delay and bandwidth info exist.
+for src in servers:
+    for dest in servers:
+        if src == dest:
+            continue  # Skip self-connection
+
+        delay_value = delays[src].get(dest)
+        bandwidth_value = bandwidths[src].get(dest)
+
+        if delay_value is not None and bandwidth_value is not None:
+            # Use list index for gate positions
+            src_index = servers.index(src)
+            dest_index = servers.index(dest)
+
+            ned_lines.append(
+                f"\t\t{src}.out[{dest_index}] --> {{ delay = {delay_value}ms; datarate = {bandwidth_value}; }} --> {dest}.in[{src_index}];"
+            )
+
+ned_lines.append("}")
+
+# Write the generated NED file content to a file
+output_filename = 'network.ned'
+with open(output_filename, 'w') as f:
+    f.write("\n".join(ned_lines))
+
+print(f"NED file generated successfully as '{output_filename}'.")

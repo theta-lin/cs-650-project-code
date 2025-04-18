@@ -1,0 +1,109 @@
+#include <omnetpp.h>
+#include "packet_m.h"
+#include "global.h"
+
+#include <map>
+#include <tuple>
+
+using namespace omnetpp;
+
+class Subserver : public cSimpleModule
+{
+  private:
+    Global *g;
+    int sId, sNext, sPrev;
+    std::map<std::tuple<int, int>, int> localInReceived;
+
+  protected:
+    virtual void initialize() override;
+    virtual void handleMessage(cMessage *msg) override;
+};
+
+Define_Module(Subserver);
+
+void Subserver::initialize()
+{
+    g = check_and_cast<Global *>(getModuleByPath("global"));
+    sId = par("id").intValue();
+    sNext = g->nextSubserver[sId];
+    sPrev = g->prevSubserver[sId];
+
+    if (sId == g->firstSubserver) {
+        for (int i = 0; i * g->Bm < g-> B; ++i)
+        {
+            auto *pkt = new GlobalIn();
+            pkt->setInId(i);
+            pkt->setByteLength(g->inSize);
+            scheduleAt(simTime(), pkt);
+        }
+    }
+}
+
+void Subserver::handleMessage(cMessage *msg)
+{
+    if (auto rec = dynamic_cast<GlobalIn*>(msg); rec != nullptr)
+    {
+        int inId = rec->getInId();
+        for (int i = 0; i < g->m; ++i)
+        {
+            auto *pkt = new DownloadIn();
+            pkt->setInId(inId);
+            pkt->setLayer(0);
+            pkt->setByteLength(g->inSize);
+            send(pkt, "localOut", i);
+        }
+        localInReceived[std::make_tuple(inId, 0)] = 0;
+    }
+    else if (auto rec = dynamic_cast<UploadIn*>(msg); rec != nullptr)
+    {
+        int inId = rec->getInId();
+        int layer = rec->getLayer();
+        auto &cnt = localInReceived[std::make_tuple(inId, layer)];
+        cnt += 1;
+
+        if (cnt == g->m)
+        {
+            localInReceived.erase(std::make_tuple(inId, layer));
+            EV << "sId: " << sId << "inId: " << inId << " layer: " << layer << " completed" << '\n';
+            if (layer == g->Lg - 1)
+            {
+                if (sNext == -1)
+                {
+                    auto *pkt = new GlobalDOut();
+                    pkt->setInId(inId);
+                    scheduleAt(simTime(), pkt);
+                }
+                else
+                {
+                    auto *pkt = new GlobalIn();
+                    pkt->setByteLength(g->inSize);
+                    send(pkt, "globalOut", sNext);
+                }
+            }
+            else
+            {
+                for (int i = 0; i < g->m; ++i)
+                {
+                    auto *pkt = new DownloadIn();
+                    pkt->setInId(inId);
+                    pkt->setLayer(layer + 1);
+                    pkt->setByteLength(g->inSize);
+                    send(pkt, "localOut", i);
+                }
+                localInReceived[std::make_tuple(inId, 0)] = 0;
+            }
+        }
+    }
+    else if (auto rec = dynamic_cast<GlobalDOut*>(msg); rec != nullptr)
+    {
+        int inId = rec->getInId();
+        if (sPrev != -1)
+        {
+            auto *pkt = new GlobalDOut();
+            pkt->setInId(inId);
+            send(pkt, "globalOut", sPrev);
+        }
+    }
+
+    delete msg;
+}

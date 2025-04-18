@@ -1,0 +1,184 @@
+import csv
+import math
+
+# Load delay and bandwidth matrices
+def load_matrix(filename):
+    data = {}
+    with open(filename, newline='') as f:
+        reader = csv.reader(f)
+        headers = next(reader)[1:]
+        for row in reader:
+            src = row[0]
+            data[src] = {}
+            for i, val in enumerate(row[1:]):
+                dest = headers[i]
+                data[src][dest] = val.strip() if val.strip() else None
+    return data, headers
+
+# Load subserver-subserver data
+bandwidths, servers = load_matrix("subserver_bandwidth_Gbps.csv")
+delays, _ = load_matrix("subserver_delay_ms.csv")
+
+# Load client-subserver characteristics
+client_data = {}
+with open("client_down_up_mbps_delay_ms.csv") as f:
+    reader = csv.DictReader(f)
+    for row in reader:
+        client_data[row["Region"]] = {
+            "Download": f'{row["Download"]}Mbps',
+            "Upload": f'{row["Upload"]}Mbps',
+            "Delay": f'{row["Delay"]}ms',
+        }
+
+ned_lines = []
+
+delay_matrix_strs = []
+bandwidth_matrix_strs = []
+
+for src in servers:
+    delay_row = []
+    bw_row = []
+    for dest in servers:
+        delay_val = delays[src].get(dest)
+        bw_val = bandwidths[src].get(dest)
+        delay_row.append(str(float(delay_val)) if delay_val else "0")
+        bw_row.append(str(float(bw_val)) if bw_val else "0")
+    delay_matrix_strs.append("[" + ", ".join(delay_row) + "]")
+    bandwidth_matrix_strs.append("[" + ", ".join(bw_row) + "]")
+
+delay_matrix_str = "[\n                " + ",\n                ".join(delay_matrix_strs) + "\n            ]"
+bandwidth_matrix_str = "[\n                " + ",\n                ".join(bandwidth_matrix_strs) + "\n            ]"
+
+# Define Subserver and Client types
+ned_lines += [
+    "channel PipelinedChannel extends ned.DatarateChannel",
+    "{",
+    "    @class(PipelinedChannel);",
+    "}",
+    "simple Global {",
+    "    parameters:",
+    "        int n;",
+    "        int m;",
+    "        int B;",
+    "        int Bm;",
+    "        int D;",
+    "        int F;",
+    "        int L;",
+    "        int dtSize;",
+    "        int numBatch;",
+    "        object subserverDelay;",
+    "        object subserverBandwidth;",
+    "}",
+    "",
+    "simple Subserver {",
+    "    parameters:",
+    "        int id;",
+    "        double C;",
+    "    gates:",
+    f"        input globalIn[{len(servers)}];",
+    f"        output globalOut[{len(servers)}];",
+    "        input localIn[5];",
+    "        output localOut[5];",
+    "}",
+    "",
+    "simple Client {",
+    "    parameters:",
+    "        int id;",
+    "    gates:",
+    "        input in;",
+    "        output out;",
+    "}",
+    "",
+    "network Network {",
+    "    submodules:",
+    "        global: Global { @display(\"i=block/control;p=50,50\");",
+    "             n = 8;",
+    "             m = 5;",
+    # "             B = 1000000;",
+    "             B = 1000000;",
+
+    # "             Bm = 10000;",
+    "             Bm = 50000;",
+    # "             Bm = 100000;",
+
+    # "             D = 8192;",
+    "             D = 16384;",
+
+    # "             F = 28672;",
+    "             F = 53248;",
+
+    # "             L = 80;",
+    "             L = 126;",
+
+    "             dtSize = 4;",
+    "             numBatch = 1000;",
+    f"             subserverDelay = {delay_matrix_str};",
+    f"             subserverBandwidth = {bandwidth_matrix_str};",
+    "        }",
+]
+
+# Place subservers in a circle
+radius = 220
+center_x, center_y = 370, 370
+for i, server in enumerate(servers):
+    angle = 2 * math.pi * i / len(servers)
+    x = center_x + radius * math.cos(angle)
+    y = center_y + radius * math.sin(angle)
+    ned_lines.append(f'        {server}: Subserver {{ id = {i}; C = {i + 1}e18; @display("p={int(x)},{int(y)}"); }}')
+
+# Place clients in small arcs around their subservers (slightly outside the subserver ring)
+client_radius_offset = 120  # distance from subserver to its clients
+clients_per_subserver = 5
+client_arc_span = math.pi / 2  # total spread angle for all clients per subserver
+
+for i, region in enumerate(servers):
+    server_angle = 2 * math.pi * i / len(servers)
+    base_angle = server_angle - client_arc_span / 2
+    server_x = center_x + radius * math.cos(server_angle)
+    server_y = center_y + radius * math.sin(server_angle)
+
+    for cid in range(clients_per_subserver):
+        angle = base_angle + (client_arc_span / (clients_per_subserver - 1)) * cid
+        x = server_x + client_radius_offset * math.cos(angle)
+        y = server_y + client_radius_offset * math.sin(angle)
+        name = f"{region}C{cid}"
+        ned_lines.append(f'        {name}: Client {{ id = {cid}; @display("p={int(x)},{int(y)}"); }}')
+
+# Add connections
+ned_lines.append("    connections allowunconnected:")
+
+# Subserver to Subserver connections
+for src in servers:
+    for dest in servers:
+        if src == dest:
+            continue
+        delay_val = delays[src].get(dest)
+        bw_val = bandwidths[src].get(dest)
+        if delay_val and bw_val:
+            sidx = servers.index(src)
+            didx = servers.index(dest)
+            ned_lines.append(
+                f'        {src}.globalOut[{didx}] --> PipelinedChannel {{ delay = {delay_val}ms; datarate = {bw_val}Gbps; }} --> {dest}.globalIn[{sidx}];'
+            )
+
+# Client to Subserver connections
+for region in servers:
+    for cid in range(5):
+        client = f"{region}C{cid}"
+        delay = client_data[region]["Delay"]
+        up = client_data[region]["Upload"]
+        down = client_data[region]["Download"]
+        ned_lines.append(
+            f'        {client}.out --> PipelinedChannel {{ delay = {delay}; datarate = {up}; }} --> {region}.localIn[{cid}];'
+        )
+        ned_lines.append(
+            f'        {region}.localOut[{cid}] --> PipelinedChannel {{ delay = {delay}; datarate = {down}; }} --> {client}.in;'
+        )
+
+ned_lines.append("}")
+
+# Write to file
+with open("network.ned", "w") as f:
+    f.write("\n".join(ned_lines))
+
+print("Generated network.ned with subservers and clients.")

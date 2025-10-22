@@ -1,0 +1,179 @@
+\documentclass{article}
+
+% if you need to pass options to natbib, use, e.g.:
+%     \PassOptionsToPackage{numbers, compress}{natbib}
+% before loading neurips_2024
+
+
+% ready for submission
+%\usepackage{neurips_2024}
+
+
+% to compile a preprint version, e.g., for submission to arXiv, add add the
+% [preprint] option:
+%\usepackage{neurips_2024}
+
+
+% to compile a camera-ready version, add the [final] option, e.g.:
+\usepackage[final]{neurips_2024}
+\usepackage{graphicx}
+
+% to avoid loading the natbib package, add option nonatbib
+%\usepackage[nonatbib]{neurips_2024}
+
+
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage{xcolor}         % colors
+\usepackage{amsmath}
+
+\usepackage{biblatex}
+\addbibresource{ref.bib}
+\title{
+    \Large Train Large Models Across the World: Accelerating Training on Geo-Distributed Heterogeneous Clusters
+    via Bandwidth-Aware Collective Communication\\[1em]
+    \normalsize CS650 Project Progress Report
+}
+
+
+% The \author macro works with any number of authors. There are two commands
+% used to separate the names and addresses of multiple authors: \And and \AND.
+%
+% Using \And between authors leaves it to LaTeX to determine where to break the
+% lines. Using \AND forces a line break at that point. So, if LaTeX puts 3 of 4
+% authors names on the first line, and the last on the second line, try using
+% \AND instead of \And before the third author name.
+
+
+\author{%
+  Yuxiang Lin \\
+  %Department of Computer Science\\
+  %Cranberry-Lemon University\\
+  %Pittsburgh, PA 15213 \\
+  %\texttt{hippo@cs.cranberry-lemon.edu} \\
+  % examples of more authors
+  \And
+  Tianjun Yuan \\
+  %Affiliation \\
+  %Address \\
+  %\texttt{email} \\
+  % \AND
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+  % \And
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+  % \And
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+}
+
+
+\begin{document}
+
+
+\maketitle
+
+
+% \begin{abstract}
+%   The abstract paragraph should be indented \nicefrac{1}{2}~inch (3~picas) on
+%   both the left- and right-hand margins. Use 10~point type, with a vertical
+%   spacing (leading) of 11~points.  The word \textbf{Abstract} must be centered,
+%   bold, and in point size 12. Two line spaces precede the abstract. The abstract
+%   must be limited to one paragraph.
+% \end{abstract}
+
+
+\section{Introduction}
+
+\subsection{Motivation}
+
+With the rapid growth in the size of foundation models \cite{achiam2023gpt, touvron2023llama}, training large-scale neural networks on a single machine has become increasingly impractical. \emph{Distributed learning} \cite{chen2021distributed} tackles this challenge by splitting the computational and data loads across multiple nodes, alleviating resource bottlenecks. Modern large-scale training clusters are often heterogeneous, comprising CPUs, GPUs, and specialized accelerators \cite{duan2024efficient}; although such diversity can boost performance, it also complicates workload balancing and inter-node communication—particularly for collective operations like AllReduce and ReduceScatter \cite{won2024tacos, cho2019blueconnect} that aggregate gradients from all nodes. 
+
+\subsection{Heterogeneous Network}
+
+A network of nodes can be represented by a directed graph, where the vertices correspond to the nodes. There exists a directed edge $e$ between every pair of vertices with an associated edge cost $(\alpha_e, \beta_e)$ representing a link between two nodes. The $\alpha$-$\beta$ model \cite{hockney1994communication} represents the latency with $\alpha$ and reciprocal bandwidth with $\beta$, such that the cost of sending a chunk of size $n$ through the link takes time $\alpha + \beta n$.
+
+Our setting builds on these ideas by designing a \emph{virtual topology} simulating a world map. Close geographic points form clusters, each containing one or more \emph{subservers} with high-bandwidth links for inter-regional data exchange. In this way, each client in a cluster has fast local access to its subserver, while subservers collectively support efficient cross-region communication—an architecture that aims to reduce latency and overhead for distributed training at scale.
+
+\section{Scope}
+
+\subsection{Parallelize DNNs for Training}
+
+A simplified DNN layer can be represented as multiplying the input of size $[B, D]$ by the product of two matrices $W_{\text{in}}[D, F] \cdot_F W_{\text{out}} [F, D]$ \cite{scaling-book}. $B, D$, and $F$ represents batch size, hidden dimension, and the feed-forward dimension respectively.
+
+We will explore the following ways to parallelize a DNN and the combination of these methods \cite{scaling-book}:
+
+\begin{enumerate}
+    \item \textbf{Data parallelism}: Activations sharded along $B$.
+    \item \textbf{Fully-sharded data parallelism}: Activations sharded along $B$ and parameters sharded along an axis.
+    \item \textbf{Tensor parallelism}: Parameters sharded along $F$.
+    \item \textbf{Pipeline parallelism}: Layers in the DNN pipeline sharded onto different devices.
+\end{enumerate}
+
+Current distributed ML approaches typically combine data and pipeline parallelism. The Asteroid paper \cite{ye2024asteroid} compares hybrid data parallelism (HDP) and hybrid pipeline parallelism (HPP), opting for HPP. HDP groups nodes, applying pipeline parallelism within groups and data parallelism between them, whereas HPP does the opposite. SDPipe \cite{miao2023sdpipe} organizes workers in a grid, using data parallelism along one axis and pipeline parallelism along the other.
+
+To optimize node assignment in pipeline parallelism, we build on the dynamic programming method from \cite{luo2022efficient}, also used in Asteroid \cite{ye2024asteroid}. Notably, \cite{luo2022efficient} ignores network latency and assumes AllReduce time is dictated by the lowest link bandwidth--assumptions unlikely to hold in heterogeneous networks like the Internet.
+
+We remark that unlike the data parallelism mentioned earlier, data parallelism in these works does not synchronize gradients every backward pass; instead, gradients remain sharded across batches and are periodically averaged.
+
+Unlike prior work, we explore all four types of model parallelism and their combinations, rather than limiting ourselves to data and pipeline parallelism.
+
+\subsection{Collective Communication}
+
+Collective communication routines (e.g., AllReduce, AllGather) facilitate node communication during DNN training. We aim to design and implement routines that adapt to heterogeneous network topologies.
+
+TACOS \cite{won2024tacos} generates topology-aware collective algorithms by modeling optimization as a link-chunk matching problem in a time-expanded network. While it supports heterogeneous networks via the $\alpha$-$\beta$ model, it assumes a uniform chunk size $n$ across all links. Though evaluated on heterogeneous topologies like 2D Switch, its link characteristics are drawn from a limited set, unlike the diverse conditions in Internet-connected nodes. Other automatic synthesis methods are even more constrained—TACCL \cite{shah2023taccl} only models symmetric node connections, while Blink \cite{wang2020blink} applies solely to one-to-many collectives.
+
+We plan to develop adaptive collective communication routines, building on TACOS \cite{won2024tacos}.
+
+\subsection{Micro-Batching and Convergence}
+
+To prevent pipeline bubbles when using pipeline parallelism, multiple ``microbatches" are sent down the pipeline before gradient update for the first microbatch returns to the first layer. This will have a small negative impact on convergence due to using stale values. However, since we are unable to find a paper with analytical bounds for convergence when using microbatching, we would assume that our approach would have a rate of convergence close to similar approaches such as \cite{ye2024asteroid}.
+
+% \item \textbf{Communication-Topology Optimization.} We will design and implement collective communication routines (e.g., AllReduce, AllGather) that adapt to heterogeneous network topologies. By analyzing link bandwidths and latency characteristics, we aim to minimize data-transfer bottlenecks during gradient aggregation.
+
+\section{Evaluation Methodology Revised}
+
+We begin by designing a virtual topology that emulates a world map, where some points (nodes) are geographically close and others are far apart. Each group of nearby points forms a cluster. We were trying to apply evaluation on small language models. In the current stage, however, we are starting with a \emph{dense neural network} (i.e., primarily matrix multiplication) to simplify and validate our initial experiments. If resources and time permit, we intend to extend our study to larger models such as DeepSeek-V3\cite{liu2024deepseek}, LLaMA\cite{touvron2023llama}, or other foundation models.
+Our evaluation includes:
+
+\begin{enumerate}
+    \item \textbf{Analytical Model:} 
+    We will construct a performance model of the distributed learning communication algorithm. 
+    This involves mathematical derivation an further roofline analysis~\cite{scaling-book} for rough estimates of compute and communication overheads and a dependency-graph-based approach~\cite{neglia2019role} to capture node-to-node interaction and assumptions on convergence.
+    
+    \item \textbf{Network Simulation:} 
+    If the time allows, we will implement a simulation study with a network simulator parameterized by \textit {Compute times} for each neural network layer and \textit{Data exchange volumes} between subservers.
+\end{enumerate}
+
+Possible simulation frameworks include \textbf{ASTRA-sim}~\cite{rashidi2020astra} and \textbf{bksim2}~\cite{jiang2013detailed} (citation fixed), referencing their original publications for accurate modeling capabilities.
+Through this two-pronged methodology, we aim to capture both the high-level performance bounds (via analytical modeling) and the detailed communication-compute interplay (via simulation). As we progress, we will refine both the topology design and the model selection to ensure that our results generalize from dense networks to large-scale foundation models. 
+
+\section{Note on Scope Adjustment}
+
+Instead of focusing on parallelizing training for Transformers and LLMs, we now broadly focus on parallelizing DNN training. This avoids the burden of diving into the Transformers architecture. The general optimizations for DNN would also work for Transformers in training, as attention is only a small part of training computation.
+
+% \bibliographystyle{IEEEtran}
+
+\printbibliography
+
+\appendix
+
+\section*{ML Tool Use}
+
+ML tools including ChatGPT-4o  and NotebookLM have been used for researching and summarizing the papers referenced in this proposal, and to refine and improve the grammar of the text. 
+
+\end{document}

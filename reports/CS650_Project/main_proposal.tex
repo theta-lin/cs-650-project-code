@@ -1,0 +1,165 @@
+\documentclass{article}
+
+% if you need to pass options to natbib, use, e.g.:
+%     \PassOptionsToPackage{numbers, compress}{natbib}
+% before loading neurips_2024
+
+
+% ready for submission
+%\usepackage{neurips_2024}
+
+
+% to compile a preprint version, e.g., for submission to arXiv, add add the
+% [preprint] option:
+%\usepackage{neurips_2024}
+
+
+% to compile a camera-ready version, add the [final] option, e.g.:
+\usepackage[final]{neurips_2024}
+
+
+% to avoid loading the natbib package, add option nonatbib
+%\usepackage[nonatbib]{neurips_2024}
+
+
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage{xcolor}         % colors
+
+\usepackage{biblatex}
+\addbibresource{ref.bib}
+\title{
+    \Large Accelerating Foundation Model Training on Heterogeneous Clusters
+    via Bandwidth-Aware Collective Communication \\[1em]
+    \normalsize CS650 Project Proposal
+}
+
+
+% The \author macro works with any number of authors. There are two commands
+% used to separate the names and addresses of multiple authors: \And and \AND.
+%
+% Using \And between authors leaves it to LaTeX to determine where to break the
+% lines. Using \AND forces a line break at that point. So, if LaTeX puts 3 of 4
+% authors names on the first line, and the last on the second line, try using
+% \AND instead of \And before the third author name.
+
+
+\author{%
+  Yuxiang Lin \\
+  %Department of Computer Science\\
+  %Cranberry-Lemon University\\
+  %Pittsburgh, PA 15213 \\
+  %\texttt{hippo@cs.cranberry-lemon.edu} \\
+  % examples of more authors
+  \And
+  Tianjun Yuan \\
+  %Affiliation \\
+  %Address \\
+  %\texttt{email} \\
+  % \AND
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+  % \And
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+  % \And
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+}
+
+
+\begin{document}
+
+
+\maketitle
+
+
+% \begin{abstract}
+%   The abstract paragraph should be indented \nicefrac{1}{2}~inch (3~picas) on
+%   both the left- and right-hand margins. Use 10~point type, with a vertical
+%   spacing (leading) of 11~points.  The word \textbf{Abstract} must be centered,
+%   bold, and in point size 12. Two line spaces precede the abstract. The abstract
+%   must be limited to one paragraph.
+% \end{abstract}
+
+\section{Introduction and Motivation}
+
+\subsection{Distributed Learning for Foundation Models}
+
+With the rapid growth of size of foundation models \cite{kaplan2020scalinglawsneurallanguage}, such as GPT \cite{floridi2020gpt, achiam2023gpt}, and Llama families \cite{touvron2023llama}, training large-scale neural networks on a single machine has become increasingly impractical. Distributed learning \cite{chen2021distributed} addresses this challenge by splitting both the computational and data loads across multiple nodes, alleviating resource limitations. 
+
+In typical neural network training \cite{lecun2015deep}, forward propagation generates outputs from input data, while backward propagation computes gradients to adjust model parameters. Extending these steps to a distributed setting demands synchronization of parameters among nodes.  Data parallelism \cite{neglia2019role} is a commonly used strategy where the training dataset is partitioned across multiple nodes, each holding a copy of the model. Each worker performs forward and backward propagation on its assigned data subset to compute gradients.
+
+\subsection{Heterogeneous Systems}
+
+Modern large-scale training environments often involve heterogeneous clusters consisting of CPUs, GPUs, and specialized accelerators \cite{duan2024efficient}. While these diverse resources can significantly boost performance, they also pose challenges in balancing workloads and managing communication overhead—especially when different devices exhibit varying compute and memory capabilities.
+
+Moreover, synchronization remains essential for consistent learning progress. During backpropagation, gradients for each layer must be aggregated across all nodes before parameter updates occur. This process relies on collective communication operations \cite{won2024tacos, cho2019blueconnect} (e.g., AllReduce, AllGather, ReduceScatter). Therefore, to fully exploit heterogeneous systems while maintaining high efficiency, it is crucial to: \begin{itemize} 
+\item \textbf{Optimize the collective communication patterns} with regard to network topology \cite{neglia2019role}. 
+\item \textbf{Improve communication scheduling} so that compute and communication can occur in parallel, maximizing overall throughput \cite{won2024tacos}. 
+\end{itemize}
+
+
+
+
+
+\section{Related Work}
+
+\subsection{Distributed Transformer-based Foundation Models}
+
+Foundation models (FMs) have evolved from Transformer \cite{vaswani2017attention}. Early milestones, such as GPT \cite{radford2018improving} and BERT \cite{devlin2018bert}, utilized large-scale pretraining on diverse datasets to achieve state-of-the-art results across a variety of natural language processing tasks. Nevertheless, fine-tuning these large models in distributed environments remains underexplored, particularly in settings where communication costs are high and bandwidth is constrained.
+
+The existing distributed method trains models by keeping data and training both locally as in FedAvg \cite{mcmahan2017communication}. Recent work \cite{zhuang2023foundation, ren2024advances} extends these methods to fine-tune foundation models. However, those works focus on privacy, while they break with large language models, which can be queried for data from others. Moreover, individual clients often lack sufficient data. Our work focuses more on resource utilization assuming large amount of data is independent and identically distributed.
+
+\subsection{Collective Communication Algorithms}
+
+Various collective communication algorithms designed for specific ML accelerators, which can be categorized as pre-defined or synthesized algorithms \cite{duan2024efficient}. Pre-defined algorithms have a fixed communication pattern such as ring, tree, or hybrid. Synthesized algorithms are optimized for specific topologies. One such synthesizer is TACOS \cite{won2024tacos}, which automatically generates topology-aware collective algorithms by framing the optimization goal as a link-chunk matching problem using a time-expanded network representation.
+
+\subsection{Heterogeneous Parallelism}
+
+Heterogeneous parallelism \cite{duan2024efficient} in hardware leverages diverse computing resources such as CPUs, GPUs, and specialized accelerators to optimize training efficiency in large models such as large language models (LLMs), particularly in environments with varying computational power and network bandwidth constraints. Modern approaches dynamically partition workloads across different devices, balancing computation-intensive and memory-bound operations while adapting to hardware-specific capabilities \cite{park2020hetpipe}. Advanced scheduling techniques minimize idle time by synchronizing tasks efficiently, often employing pipeline and data parallelism in hybrid configurations. Communication optimization strategies reduce bottlenecks by decentralizing synchronization and intelligently routing data transfers to accommodate varying interconnect speeds \cite{miao2023sdpipe}. These advancements collectively enhance performance and resource utilization in large-scale, mixed-device training clusters.
+
+\section{Proposed Scope}
+
+
+We summarize our potential scope as follows:
+
+\begin{enumerate} 
+
+\item \textbf{Communication-Topology Optimization.} We will design and implement collective communication routines (e.g., AllReduce, AllGather) that adapt to heterogeneous network topologies. By analyzing link bandwidths and latency characteristics, we aim to minimize data-transfer bottlenecks during gradient aggregation.
+
+\item \textbf{Communication-Compute Overlap.} We will develop scheduling techniques that partition and reorder communication tasks to overlap with forward/backward passes, thereby reducing time on different device types.
+
+\item \textbf{Analytical Modeling and Simulation.} 
+We will test our proposed methods on representative foundation-model workloads, measuring speedup, scalability, communication overhead, and eventual convergence rate under varied network conditions. 
+
+\end{enumerate}
+
+
+\section{Evaluation Methodology}
+
+Initially, we will construct an analytical performance model for our distributed learning communication algorithm. First, we estimate the compute and communication cost to train a foundation model (e.g. GPT2\cite{floridi2020gpt} or BERT\cite{devlin2018bert}) via roofline analysis \cite{scaling-book}. Then, we use a dependency graph to model communication between nodes \cite{neglia2019role}, and introduce assumptions regarding convergence speed.
+
+We will then proceed to network simulation. It will be carried out by a network simulator parameterized with reasonable assumptions on the compute time of each layer and the amount of data exchanged. Candidates for the simulator are ASTRA-sim as used in \cite{won2024tacos} or bksim2 as used in \cite{9138924}.
+
+\printbibliography
+
+\appendix
+
+\section*{ML Tool Use}
+
+ML tools including ChatGPT and NotebookLM have been used for researching and summarizing the papers referenced in this proposal, and to refine and improve the grammar of the text. 
+
+\end{document}
